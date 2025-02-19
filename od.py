@@ -2,7 +2,7 @@ import pandas as pd
 from connection import get_clickhouse_client
 import os
 import calendar
-from datetime import datetime
+from datetime import datetime, timedelta
 
 def load_query(query_name):
     """Load SQL query from queries.sql file"""
@@ -40,62 +40,94 @@ def fetch_od_data(client, start_date, end_date):  # Changed from fetch_od_traffi
         return pd.DataFrame()
 
 def create_od_pivot(dfs):
-    """Create OD pivot table with FTD, MTD, LMTD columns, Growth and Projection"""
+    """Create OD pivot table with all columns including last two months"""
     if not dfs:
         return pd.DataFrame(columns=['FTD', 'MTD', 'LMTD'])
 
-    # Initialize with all required columns
-    columns = ['Index', 'FTD', 'MTD', 'LMTD']
-    all_data = pd.DataFrame(columns=columns)
+    # Get month names for column headers
+    today = datetime.now()
+    last_month = (today.replace(day=1) - timedelta(days=1))
+    last_last_month = (last_month.replace(day=1) - timedelta(days=1))
+    
+    last_month_name = last_month.strftime('%b%y')
+    last_last_month_name = last_last_month.strftime('%b%y')
+    
+    # Create and process main data
+    all_data = pd.DataFrame(columns=['Index', 'FTD', 'MTD', 'LMTD'])
     
     # Process each aggregator's data
     for agg in sorted(dfs['FTD']['Aggregator'].unique()):
-        # Add aggregator total row
-        agg_row = {'Index': agg}
-        for period, df in dfs.items():
-            agg_data = df[df['Aggregator'] == agg]
-            agg_row[period] = agg_data['Sent'].sum()
-        all_data = pd.concat([all_data, pd.DataFrame([agg_row])], ignore_index=True)
-        
-        # Add part type breakdowns
-        for ptype in ['Single Part', 'Multipart']:
-            type_row = {'Index': ptype}
-            for period, df in dfs.items():
-                type_data = df[(df['Aggregator'] == agg) & (df['PartType'] == ptype)]
-                type_row[period] = type_data['Sent'].sum() if not type_data.empty else 0
-            all_data = pd.concat([all_data, pd.DataFrame([type_row])], ignore_index=True)
-    
-    # Calculate type totals
-    for ptype in ['Single Part', 'Multipart']:
-        total_row = {'Index': f'Total {ptype}'}
+        # Add aggregator data
+        agg_data = {'Index': agg}
         for period in ['FTD', 'MTD', 'LMTD']:
             if period in dfs:
-                total_row[period] = dfs[period][dfs[period]['PartType'] == ptype]['Sent'].sum()
-        all_data = pd.concat([all_data, pd.DataFrame([total_row])], ignore_index=True)
+                agg_df = dfs[period]
+                agg_data[period] = agg_df[agg_df['Aggregator'] == agg]['Sent'].sum()
+        
+        # Add last month and last-last month data
+        for period, col_name in [('last_month', last_month_name), ('last_last_month', last_last_month_name)]:
+            if period in dfs:
+                period_df = dfs[period]
+                agg_data[col_name] = period_df[period_df['Aggregator'] == agg]['Sent'].sum()
+        
+        all_data = pd.concat([all_data, pd.DataFrame([agg_data])], ignore_index=True)
+        
+        # Add type breakdowns
+        for ptype in ['Single Part', 'Multipart']:
+            type_data = {'Index': ptype}
+            for period in ['FTD', 'MTD', 'LMTD']:
+                if period in dfs:
+                    period_df = dfs[period]
+                    mask = (period_df['Aggregator'] == agg) & (period_df['PartType'] == ptype)
+                    type_data[period] = period_df[mask]['Sent'].sum()
+            
+            # Add last month and last-last month data for types
+            for period, col_name in [('last_month', last_month_name), ('last_last_month', last_last_month_name)]:
+                if period in dfs:
+                    period_df = dfs[period]
+                    mask = (period_df['Aggregator'] == agg) & (period_df['PartType'] == ptype)
+                    type_data[col_name] = period_df[mask]['Sent'].sum()
+            
+            all_data = pd.concat([all_data, pd.DataFrame([type_data])], ignore_index=True)
+    
+    # Calculate totals
+    result = all_data.set_index('Index')
+    
+    # Add type totals
+    for ptype in ['Single Part', 'Multipart']:
+        type_total = {'Index': f'Total {ptype}'}
+        for col in result.columns:
+            type_total[col] = result[result.index == ptype][col].sum()
+        result.loc[f'Total {ptype}'] = type_total
     
     # Add grand total
-    grand_total = {'Index': 'G. Total'}
-    for period in ['FTD', 'MTD', 'LMTD']:
-        if period in dfs:
-            grand_total[period] = dfs[period]['Sent'].sum()
-    all_data = pd.concat([all_data, pd.DataFrame([grand_total])], ignore_index=True)
+    grand_total = result[~result.index.str.contains('Total')].sum()
+    result.loc['G. Total'] = grand_total
     
-    # Set index and fill NaN values
-    result = all_data.set_index('Index').fillna(0)
-    
-    # Add Growth column (MTD - LMTD)
+    # Add Growth column
     result['Growth'] = result['MTD'] - result['LMTD']
     
     # Calculate projection
     today = datetime.now()
     days_in_month = calendar.monthrange(today.year, today.month)[1]
     days_completed = today.day
-    
-    # Add Projection column
     result['Projection'] = result['MTD'] * (days_in_month / days_completed)
     
-    # Round all numeric columns to nearest integer
-    numeric_columns = ['FTD', 'MTD', 'LMTD', 'Growth', 'Projection']
-    result[numeric_columns] = result[numeric_columns].round(0).astype(int)
+    # Round all numeric columns
+    result = result.round(0).astype(int)
+    
+    # Rearrange columns in desired order
+    last_month_name = last_month.strftime('%b%y')
+    last_last_month_name = last_last_month.strftime('%b%y')
+    
+    result = result.reindex(columns=[
+        'FTD',
+        'MTD',
+        'LMTD',
+        'Growth',
+        'Projection',
+        last_month_name,
+        last_last_month_name
+    ])
     
     return result

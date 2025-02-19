@@ -6,7 +6,7 @@ from traffic import fetch_traffic_data, create_traffic_pivot
 from od import fetch_od_data, create_od_pivot
 
 def get_date_ranges():
-    """Get FTD, MTD, and LMTD date ranges"""
+    """Get date ranges including last month and last-last month"""
     today = datetime.now()
     yesterday = today - timedelta(days=1)
     
@@ -24,10 +24,21 @@ def get_date_ranges():
     lmtd_start = last_month.replace(day=1).strftime('%Y-%m-%d')
     lmtd_end = last_month.replace(day=min(yesterday.day, calendar.monthrange(last_month.year, last_month.month)[1])).strftime('%Y-%m-%d')
     
+    # Last month (full month)
+    last_month_start = last_month.replace(day=1)
+    last_month_end = last_month
+    
+    # Last-last month (full month)
+    last_last_month = last_month_start - timedelta(days=1)
+    last_last_month_start = last_last_month.replace(day=1)
+    last_last_month_end = last_last_month
+    
     return {
         'FTD': (ftd_start, ftd_end),
         'MTD': (mtd_start, mtd_end),
-        'LMTD': (lmtd_start, lmtd_end)
+        'LMTD': (lmtd_start, lmtd_end),
+        'last_month': (last_month_start.strftime('%Y-%m-%d'), last_month_end.strftime('%Y-%m-%d')),
+        'last_last_month': (last_last_month_start.strftime('%Y-%m-%d'), last_last_month_end.strftime('%Y-%m-%d'))
     }
 
 # Main app section
