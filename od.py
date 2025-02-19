@@ -1,6 +1,8 @@
 import pandas as pd
 from connection import get_clickhouse_client
 import os
+import calendar
+from datetime import datetime
 
 def load_query(query_name):
     """Load SQL query from queries.sql file"""
@@ -38,7 +40,7 @@ def fetch_od_data(client, start_date, end_date):  # Changed from fetch_od_traffi
         return pd.DataFrame()
 
 def create_od_pivot(dfs):
-    """Create OD pivot table with FTD, MTD, LMTD columns"""
+    """Create OD pivot table with FTD, MTD, LMTD columns, Growth and Projection"""
     if not dfs:
         return pd.DataFrame(columns=['FTD', 'MTD', 'LMTD'])
 
@@ -79,4 +81,21 @@ def create_od_pivot(dfs):
     all_data = pd.concat([all_data, pd.DataFrame([grand_total])], ignore_index=True)
     
     # Set index and fill NaN values
-    return all_data.set_index('Index').fillna(0)
+    result = all_data.set_index('Index').fillna(0)
+    
+    # Add Growth column (MTD - LMTD)
+    result['Growth'] = result['MTD'] - result['LMTD']
+    
+    # Calculate projection
+    today = datetime.now()
+    days_in_month = calendar.monthrange(today.year, today.month)[1]
+    days_completed = today.day
+    
+    # Add Projection column
+    result['Projection'] = result['MTD'] * (days_in_month / days_completed)
+    
+    # Round all numeric columns to nearest integer
+    numeric_columns = ['FTD', 'MTD', 'LMTD', 'Growth', 'Projection']
+    result[numeric_columns] = result[numeric_columns].round(0).astype(int)
+    
+    return result
