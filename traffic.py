@@ -26,7 +26,7 @@ def load_mappings():
     return dict(zip(mappings_df['vcAgentID'], mappings_df['vcType']))
 
 def fetch_traffic_data(client, start_date, end_date):
-    """Fetch traffic summary data"""
+    """Fetch traffic summary data with values in millions"""
     query = load_query('traffic').format(
         start_date=start_date,
         end_date=end_date
@@ -42,6 +42,12 @@ def fetch_traffic_data(client, start_date, end_date):
             'iTotalExpired', 'vcPlatform', 'vcType'
         ])
         
+        # Convert metrics to millions ONLY at data source
+        numeric_cols = ['iTotalSubmitSuccess', 'iTotalSentSuccess', 'iTotalDelivered', 
+                       'iTotalRead', 'iTotalFailed', 'iTotalExpired']
+        for col in numeric_cols:
+            df[col] = (df[col] / 1_000_000).round(2)
+        
         # Update vcType using mappings
         agent_type_mappings = load_mappings()
         mask = df['vcType'].isna() | (df['vcType'] == '')
@@ -54,7 +60,7 @@ def fetch_traffic_data(client, start_date, end_date):
         return pd.DataFrame()
 
 def create_traffic_pivot(dfs):
-    """Create traffic pivot table with all columns including last two months"""
+    """Create traffic pivot table"""
     if not dfs:
         return pd.DataFrame(columns=['FTD', 'MTD', 'LMTD'])
 
@@ -127,8 +133,12 @@ def create_traffic_pivot(dfs):
     days_completed = today.day
     result['Projection'] = result['MTD'] * (days_in_month / days_completed)
     
-    # Round all numeric columns
-    result = result.round(0).astype(int)
+    # Remove rows where all numeric columns are 0 or -0
+    numeric_cols = result.select_dtypes(include=['float64', 'int64']).columns
+    result = result[~(result[numeric_cols].abs() < 0.001).all(axis=1)]
+    
+    # Round all numeric values to 2 decimal places
+    result = result.round(2)
     
     # Rearrange columns in desired order
     last_month_name = last_month.strftime('%b%y')

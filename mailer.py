@@ -4,15 +4,16 @@ import pandas as pd
 import os
 
 def create_clean_table(df):
-    """Convert DataFrame to clean HTML table with Outlook-style formatting"""
-    # Convert DataFrame to HTML with minimal styling
+    """Convert DataFrame to HTML table with styling"""
+    # Convert DataFrame to HTML with styling
     html = df.to_html(
         classes='clean-table',
-        float_format=lambda x: '{:,.0f}'.format(x),
-        border=0
+        float_format=lambda x: '{:.2f}'.format(x),  # Keep 2 decimal places
+        border=1,
+        justify='left'
     )
     
-    # Add clean, minimal CSS
+    # Add clean, minimal CSS with row coloring
     styled_html = f"""
     <style>
         .clean-table {{
@@ -22,20 +23,25 @@ def create_clean_table(df):
             width: 100%;
             margin: 10px 0;
         }}
+        .clean-table th, .clean-table td {{
+            padding: 4px 8px;
+            border: 1px solid #dddddd;
+            text-align: left;
+        }}
         .clean-table th {{
             background-color: #f8f9fa;
             color: #333333;
             font-weight: normal;
-            padding: 4px 8px;
-            text-align: left;
-            border-bottom: 1px solid #dddddd;
         }}
-        .clean-table td {{
-            padding: 4px 8px;
-            border-bottom: 1px solid #dddddd;
+        /* Color for aggregator rows (those without 'Part' in index) */
+        .clean-table tr td:first-child {{
+            background-color: #f5f5f5;
         }}
-        .clean-table tr:last-child td {{
-            border-bottom: none;
+        /* Color for total rows */
+        .clean-table tr:last-child td,
+        .clean-table tr td:first-child[data-value*="Total"] {{
+            background-color: #f0f0f0;
+            font-weight: bold;
         }}
     </style>
     {html}
@@ -55,17 +61,19 @@ def send_summary_email(traffic_pivot, od_pivot, excel_path, recipients):
         body = f"""
         <html>
         <body style="font-family: 'Calibri', sans-serif; font-size: 11pt; color: #333333; line-height: 1.4;">
-            <p>Dear All,</p>
+            <p>Dear Sir,</p>
             
-            <p>Please find the RCS Traffic Summary Report as of {pd.Timestamp.now().strftime('%Y-%m-%d')}</p>
+            <p>Please find the RCS vol for {pd.Timestamp.now().strftime('%b\'%y')}.</p>
             
             <div style="margin: 20px 0;">
                 <p style="font-weight: bold; margin-bottom: 8px;">Traffic Summary:</p>
+                <p style="color: #666666; font-size: 10pt; margin-bottom: 8px;">*vol in Millions</p>
                 {create_clean_table(traffic_pivot)}
             </div>
             
             <div style="margin: 20px 0;">
                 <p style="font-weight: bold; margin-bottom: 8px;">OD Traffic Summary:</p>
+                <p style="color: #666666; font-size: 10pt; margin-bottom: 8px;">*vol in Millions</p>
                 {create_clean_table(od_pivot)}
             </div>
             
@@ -73,9 +81,7 @@ def send_summary_email(traffic_pivot, od_pivot, excel_path, recipients):
                 Please find the detailed analysis in the attached Excel file.
             </p>
             
-            <p style="color: #666666; font-size: 10pt; margin-top: 30px;">
-                This is an auto-generated email. Please do not reply.
-            </p>
+            <p>Thanks and Regards</p>
         </body>
         </html>
         """

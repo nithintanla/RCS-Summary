@@ -14,7 +14,7 @@ def create_vctype_daily_pivot(df):
         index='dtDate',
         columns=['vcType'],
         values=['iTotalSentSuccess', 'iTotalDelivered'],
-        aggfunc=lambda x: sum(x) / 1_000_000,  # Convert to millions
+        aggfunc='sum',  # Removed millions division
         fill_value=0
     ).round(2)
     
@@ -48,9 +48,9 @@ def create_od_agent_pivot(df):
     # Create pivot with aggregator grouping
     pivot = pd.pivot_table(
         od_data,
-        index=['vcORGName', 'vcAgentName'],  # Two-level index
+        index=['vcORGName', 'vcAgentName'],
         values=['iTotalSentSuccess', 'iTotalDelivered'],
-        aggfunc=lambda x: sum(x) / 1_000_000,  # Convert to millions
+        aggfunc='sum',  # Removed millions division
         fill_value=0
     ).round(2)
     
@@ -58,14 +58,19 @@ def create_od_agent_pivot(df):
     pivot.columns = ['Sent', 'Delivered']
     
     # Add subtotals for each aggregator
+    result = pivot.copy()
     for org in od_data['vcORGName'].unique():
-        idx = (org, 'Total')
-        pivot.loc[idx] = pivot.loc[org].sum()
+        org_data = pivot.loc[org]
+        result.loc[(org, 'Total')] = org_data.sum()
     
     # Add grand total
-    pivot.loc[('Grand Total', '')] = pivot.xs(level=1, drop_level=False, index=slice(None)).sum()
+    grand_total = pd.Series({
+        'Sent': pivot['Sent'].sum(),
+        'Delivered': pivot['Delivered'].sum()
+    })
+    result.loc[('Grand Total', '')] = grand_total
     
-    return pivot
+    return result
 
 def create_content_type_pivot(od_df):
     """Table 3: Content type breakdown by agent and date"""
@@ -78,7 +83,7 @@ def create_content_type_pivot(od_df):
         index=['Agent', 'ContentType'],
         columns='Date',
         values='Sent',
-        aggfunc=lambda x: sum(x) / 1_000_000,  # Convert to millions
+        aggfunc='sum',  # Removed millions division
         fill_value=0
     ).round(2)
     
@@ -93,6 +98,15 @@ def create_content_type_pivot(od_df):
 def create_detailed_hierarchy(df):
     """Table 4: Detailed hierarchy with all dimensions"""
     if df.empty:
+        return pd.DataFrame()
+    
+    records = []
+    
+    for date in sorted(df['dtDate'].unique()):
+        date_df = df[df['dtDate'] == date]
+        for org in sorted(date_df['vcORGName'].unique()):
+            org_df = date_df[date_df['vcORGName'] == org]
+            for vtype in sorted(org_df['vcType'].unique()):
                 type_df = org_df[org_df['vcType'] == vtype]
                 for agent in sorted(type_df['vcAgentName'].unique()):
                     agent_df = type_df[type_df['vcAgentName'] == agent]
@@ -201,7 +215,7 @@ def create_agent_agg_pivot(df):
     return result.fillna(0).round(0).astype({'Sent': int, 'Delivered': int})
 
 def create_volume_analysis(od_df):
-    """Create volume analysis table with RCS and SMS volumes by part type"""
+    """Table 7: Volume analysis with totals"""
     if od_df.empty:
         return pd.DataFrame()
     
@@ -268,38 +282,74 @@ def create_volume_analysis(od_df):
     days_completed = today.day
     result['Projection'] = result['Total'] * (days_in_month / days_completed)
     
-    return result.round(0).astype(int)
+    # Add RCS and SMS volume totals
+    rcs_total = result.loc['RCS Vol'].sum()
+    sms_total = result.loc['SMS Vol'].sum()
+    
+    # Add new rows for totals
+    result.loc[('RCS Vol', 'Total')] = result.loc['RCS Vol'].sum()
+    result.loc[('SMS Vol', 'Total')] = result.loc['SMS Vol'].sum()
+    
+    return result.round(2)
+
+def create_traffic_pivot(dfs):
+    """Create traffic pivot table and remove empty rows"""
+    if not dfs:
+        return pd.DataFrame(columns=['FTD', 'MTD', 'LMTD'])
+
+    # ...existing pivot creation code...
+    
+    # Remove rows where all numeric columns are 0
+    numeric_cols = result.select_dtypes(include=['float64', 'int64']).columns
+    result = result[~(result[numeric_cols] == 0).all(axis=1)]
+    
+    return result
+
+def create_od_pivot(dfs):
+    """Create OD pivot table and remove empty rows"""
+    if not dfs:
+        return pd.DataFrame(columns=['FTD', 'MTD', 'LMTD'])
+
+    # ...existing pivot creation code...
+    
+    # Remove rows where all numeric columns are 0
+    numeric_cols = result.select_dtypes(include=['float64', 'int64']).columns
+    result = result[~(result[numeric_cols] == 0).all(axis=1)]
+    
+    return result
 
 def export_mtd_analysis(traffic_df, od_df):
-    """Export all analyses to Excel"""
+    """Export all analyses to Excel with consistent styling"""
     if traffic_df.empty and od_df.empty:
         return
         
     output_path = os.path.join(os.path.dirname(__file__), 'RCS_Analysis.xlsx')
     
     with pd.ExcelWriter(output_path, engine='xlsxwriter', mode='w') as writer:
-        # Export each pivot table with new sheet names
-        create_vctype_daily_pivot(traffic_df).to_excel(
-            writer, sheet_name='Summary'
-        )
-        create_od_agent_pivot(traffic_df).to_excel(
-            writer, sheet_name='OD Summary'
-        )
-        create_content_type_pivot(od_df).to_excel(
-            writer, sheet_name='Daywise OD summary'
-        )
-        create_detailed_hierarchy(traffic_df).to_excel(
-            writer, sheet_name='Daywise'
-        )
-        create_agg_agent_pivot(traffic_df).to_excel(
-            writer, sheet_name='Aggregator'
-        )
-        create_agent_agg_pivot(traffic_df).to_excel(
-            writer, sheet_name='Botwise'
-        )
-        create_volume_analysis(od_df).to_excel(
-            writer, sheet_name='RCSVol&SMSVol'
-        )
+        workbook = writer.book
+        
+        # Define left-aligned format
+        left_format = workbook.add_format({'align': 'left'})
+        
+        # Export each table with consistent formatting
+        for name, df in [
+            ('OD Summary', create_od_agent_pivot(traffic_df)),
+            ('RCSVol&SMSVol', create_volume_analysis(od_df)),
+            ('Summary', create_vctype_daily_pivot(traffic_df)),
+            ('Daywise OD summary', create_content_type_pivot(od_df)),
+            ('Daywise', create_detailed_hierarchy(traffic_df)),
+            ('Aggregator', create_agg_agent_pivot(traffic_df)),
+            ('Botwise', create_agent_agg_pivot(traffic_df))
+        ]:
+            # Export DataFrame
+            df.to_excel(writer, sheet_name=name)
+            
+            # Get the worksheet
+            worksheet = writer.sheets[name]
+            
+            # Set left alignment for all columns
+            for col in range(len(df.columns) + 1):  # +1 for index
+                worksheet.set_column(col, col, None, left_format)
         
         print(f"Analysis exported to: {output_path}")
 

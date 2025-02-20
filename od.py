@@ -17,8 +17,8 @@ def load_query(query_name):
         return queries[1]
     return ''
 
-def fetch_od_data(client, start_date, end_date):  # Changed from fetch_od_traffic_data
-    """Fetch OD traffic data"""
+def fetch_od_data(client, start_date, end_date):
+    """Fetch OD traffic data with values in millions"""
     query = load_query('od_traffic').format(
         start_date=start_date,
         end_date=end_date
@@ -31,10 +31,11 @@ def fetch_od_data(client, start_date, end_date):  # Changed from fetch_od_traffi
             'ContentType', 'TemplateType', 'Parts', 'Received', 'Sent', 'Delivered'
         ])
         
-        # Convert metrics to millions
-        for col in ['Received', 'Sent', 'Delivered']:
-            df[col] = df[col] / 1_000_000
-            
+        # Convert metrics to millions ONLY at data source
+        numeric_cols = ['Received', 'Sent', 'Delivered']
+        for col in numeric_cols:
+            df[col] = (df[col] / 1_000_000).round(2)
+        
         df['PartType'] = df['ContentType'].apply(
             lambda x: 'Single Part' if x == 'Basic' else 'Multipart'
         )
@@ -44,7 +45,7 @@ def fetch_od_data(client, start_date, end_date):  # Changed from fetch_od_traffi
         return pd.DataFrame()
 
 def create_od_pivot(dfs):
-    """Create OD pivot table with all columns including last two months"""
+    """Create OD pivot table"""
     if not dfs:
         return pd.DataFrame(columns=['FTD', 'MTD', 'LMTD'])
 
@@ -117,8 +118,12 @@ def create_od_pivot(dfs):
     days_completed = today.day
     result['Projection'] = result['MTD'] * (days_in_month / days_completed)
     
-    # Round all numeric columns
-    result = result.round(0).astype(int)
+    # Remove rows where all numeric columns are 0 or -0
+    numeric_cols = result.select_dtypes(include=['float64', 'int64']).columns
+    result = result[~(result[numeric_cols].abs() < 0.001).all(axis=1)]
+    
+    # Round all numeric values to 2 decimal places
+    result = result.round(2)
     
     # Rearrange columns in desired order
     last_month_name = last_month.strftime('%b%y')

@@ -11,8 +11,7 @@ import os
 # After the imports, add a list of recipients
 EMAIL_RECIPIENTS = [
     'nithin.didigam@tanla.com',
-    'sambasiva.kuluru@tanla.com',
-    'debabrata.subudhiray@tanla.com'
+    'sambasiva.kuluru@tanla.com'
     # Add more email addresses here
 ]
 
