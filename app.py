@@ -5,6 +5,8 @@ import calendar
 from traffic import fetch_traffic_data, create_traffic_pivot
 from od import fetch_od_data, create_od_pivot
 from analysis import analyze_mtd_data
+from mailer import send_summary_email
+import os
 
 def get_date_ranges():
     """Get date ranges including last month and last-last month"""
@@ -74,11 +76,22 @@ try:
         od_pivot = create_od_pivot(od_dfs)
         st.dataframe(od_pivot)
     
-    # After displaying both tables, run the analysis
+    # After displaying both tables and generating Excel, send email
     if traffic_dfs and od_dfs and 'MTD' in traffic_dfs and 'MTD' in od_dfs:
         st.text("Generating detailed analysis tables...")
         analyze_mtd_data(traffic_dfs['MTD'], od_dfs['MTD'])
-        st.success("Analysis tables have been generated and saved to Excel file.")
+        
+        # Send email with summaries
+        excel_path = os.path.join(os.path.dirname(__file__), 'RCS_Analysis.xlsx')
+        recipients = [
+            'nithin.didigam@tanla.com',
+            # Add other email addresses here
+        ]
+        
+        if send_summary_email(traffic_pivot, od_pivot, excel_path, recipients):
+            st.success("Analysis tables have been generated and sent via email.")
+        else:
+            st.warning("Analysis tables generated but email sending failed.")
     
     if not traffic_dfs and not od_dfs:
         st.write("No data available")
