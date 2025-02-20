@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import calendar
 from traffic import fetch_traffic_data, create_traffic_pivot
 from od import fetch_od_data, create_od_pivot
+from analysis import analyze_mtd_data
 
 def get_date_ranges():
     """Get date ranges including last month and last-last month"""
@@ -55,11 +56,6 @@ try:
         if not df.empty:
             traffic_dfs[period] = df
     
-    if traffic_dfs:
-        st.header("Traffic Summary")
-        traffic_pivot = create_traffic_pivot(traffic_dfs)
-        st.dataframe(traffic_pivot)
-    
     # Process OD data
     od_dfs = {}
     for period, (start_date, end_date) in date_ranges.items():
@@ -67,10 +63,22 @@ try:
         if not df.empty:
             od_dfs[period] = df
     
+    # Display main summary tables first
+    if traffic_dfs:
+        st.header("Traffic Summary")
+        traffic_pivot = create_traffic_pivot(traffic_dfs)
+        st.dataframe(traffic_pivot)
+    
     if od_dfs:
         st.header("OD Traffic Summary")
         od_pivot = create_od_pivot(od_dfs)
         st.dataframe(od_pivot)
+    
+    # After displaying both tables, run the analysis
+    if traffic_dfs and od_dfs and 'MTD' in traffic_dfs and 'MTD' in od_dfs:
+        st.text("Generating detailed analysis tables...")
+        analyze_mtd_data(traffic_dfs['MTD'], od_dfs['MTD'])
+        st.success("Analysis tables have been generated and saved to Excel file.")
     
     if not traffic_dfs and not od_dfs:
         st.write("No data available")
