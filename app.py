@@ -8,6 +8,14 @@ from analysis import analyze_mtd_data
 from mailer import send_summary_email
 import os
 
+# After the imports, add a list of recipients
+EMAIL_RECIPIENTS = [
+    'nithin.didigam@tanla.com',
+    'sambasiva.kuluru@tanla.com',
+    'debabrata.subudhiray@tanla.com'
+    # Add more email addresses here
+]
+
 def get_date_ranges():
     """Get date ranges including last month and last-last month"""
     today = datetime.now()
@@ -83,12 +91,8 @@ try:
         
         # Send email with summaries
         excel_path = os.path.join(os.path.dirname(__file__), 'RCS_Analysis.xlsx')
-        recipients = [
-            'nithin.didigam@tanla.com',
-            # Add other email addresses here
-        ]
         
-        if send_summary_email(traffic_pivot, od_pivot, excel_path, recipients):
+        if send_summary_email(traffic_pivot, od_pivot, excel_path, EMAIL_RECIPIENTS):
             st.success("Analysis tables have been generated and sent via email.")
         else:
             st.warning("Analysis tables generated but email sending failed.")

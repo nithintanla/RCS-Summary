@@ -31,6 +31,10 @@ def fetch_od_data(client, start_date, end_date):  # Changed from fetch_od_traffi
             'ContentType', 'TemplateType', 'Parts', 'Received', 'Sent', 'Delivered'
         ])
         
+        # Convert metrics to millions
+        for col in ['Received', 'Sent', 'Delivered']:
+            df[col] = df[col] / 1_000_000
+            
         df['PartType'] = df['ContentType'].apply(
             lambda x: 'Single Part' if x == 'Basic' else 'Multipart'
         )

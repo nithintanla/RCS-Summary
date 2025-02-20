@@ -1,97 +1,98 @@
 import pandas as pd
 from datetime import datetime
 import os
+import calendar
 
 def create_vctype_daily_pivot(df):
-    """Table 1: Date-wise breakdown by vcType"""
+    """Table 1: Date-wise breakdown by vcType with vcType headers"""
     if df.empty:
         return pd.DataFrame()
-        
-    # Create pivot and calculate values
+    
+    # Create initial pivot
     pivot = pd.pivot_table(
         df,
         index='dtDate',
         columns=['vcType'],
         values=['iTotalSentSuccess', 'iTotalDelivered'],
-        aggfunc='sum',
+        aggfunc=lambda x: sum(x) / 1_000_000,  # Convert to millions
         fill_value=0
-    )
+    ).round(2)
     
-    # Convert to regular DataFrame and rename columns
-    result = pd.DataFrame(index=pivot.index)
+    # Restructure with proper headers
+    header_1 = pd.DataFrame(columns=pivot.columns)
+    header_2 = pd.DataFrame(columns=pivot.columns)
     
-    # Process each type
+    # Fill headers
     for vtype in ['CPL', 'Enterprise', 'OD']:
         if ('iTotalSentSuccess', vtype) in pivot.columns:
-            result[f"{vtype}_Sent"] = pivot[('iTotalSentSuccess', vtype)]
-            result[f"{vtype}_Delivered"] = pivot[('iTotalDelivered', vtype)]
+            header_1.loc[0, [('iTotalSentSuccess', vtype), ('iTotalDelivered', vtype)]] = vtype
+            header_2.loc[0, ('iTotalSentSuccess', vtype)] = 'Sent'
+            header_2.loc[0, ('iTotalDelivered', vtype)] = 'Delivered'
     
-    # Add total row
-    result.loc['Total'] = result.sum()
+    # Combine headers with data
+    result = pd.concat([header_1, header_2, pivot])
     
-    return result.fillna(0).round(0).astype(int)
+    # Add totals
+    result.loc['Total'] = result.iloc[2:].sum()
+    
+    return result
 
 def create_od_agent_pivot(df):
-    """Table 2: OD traffic by agent and aggregator"""
+    """Table 2: OD traffic by agent with aggregator grouping"""
     if df.empty:
         return pd.DataFrame()
     
     # Filter OD traffic
     od_data = df[df['vcType'] == 'OD']
     
-    # Create pivot
+    # Create pivot with aggregator grouping
     pivot = pd.pivot_table(
         od_data,
-        index='vcAgentName',
+        index=['vcORGName', 'vcAgentName'],  # Two-level index
         values=['iTotalSentSuccess', 'iTotalDelivered'],
-        aggfunc='sum',
+        aggfunc=lambda x: sum(x) / 1_000_000,  # Convert to millions
         fill_value=0
-    )
+    ).round(2)
     
     # Rename columns
     pivot.columns = ['Sent', 'Delivered']
     
-    # Add total row
-    pivot.loc['Total'] = pivot.sum()
+    # Add subtotals for each aggregator
+    for org in od_data['vcORGName'].unique():
+        idx = (org, 'Total')
+        pivot.loc[idx] = pivot.loc[org].sum()
     
-    return pivot.fillna(0).round(0).astype(int)
+    # Add grand total
+    pivot.loc[('Grand Total', '')] = pivot.xs(level=1, drop_level=False, index=slice(None)).sum()
+    
+    return pivot
 
 def create_content_type_pivot(od_df):
-    """Table 3: Content type breakdown by agent"""
+    """Table 3: Content type breakdown by agent and date"""
     if od_df.empty:
         return pd.DataFrame()
     
-    all_data = pd.DataFrame(columns=['Index', 'Basic', 'Single'])
+    # Create pivot with agent and content type indices
+    pivot = pd.pivot_table(
+        od_df,
+        index=['Agent', 'ContentType'],
+        columns='Date',
+        values='Sent',
+        aggfunc=lambda x: sum(x) / 1_000_000,  # Convert to millions
+        fill_value=0
+    ).round(2)
     
-    # Process each agent
-    for agent in sorted(od_df['Agent'].unique()):
-        agent_df = od_df[od_df['Agent'] == agent]
-        row = {
-            'Index': agent,
-            'Basic': agent_df[agent_df['ContentType'] == 'Basic']['Sent'].sum(),
-            'Single': agent_df[agent_df['ContentType'] == 'Single']['Sent'].sum()
-        }
-        all_data = pd.concat([all_data, pd.DataFrame([row])], ignore_index=True)
+    # Add total column
+    pivot['Total'] = pivot.sum(axis=1)
     
-    # Set index and add totals
-    result = all_data.set_index('Index')
-    result.loc['Grand Total'] = result.sum()
+    # Add grand total
+    pivot.loc[('Grand Total', '')] = pivot.sum()
     
-    return result.fillna(0).round(0).astype(int)
+    return pivot
 
 def create_detailed_hierarchy(df):
     """Table 4: Detailed hierarchy with all dimensions"""
     if df.empty:
-        return pd.DataFrame()
-    
-    # Create DataFrame with separate columns
-    records = []
-    
-    for date in sorted(df['dtDate'].unique()):
-        date_df = df[df['dtDate'] == date]
-        for org in sorted(date_df['vcORGName'].unique()):
-            org_df = date_df[date_df['vcORGName'] == org]
-            for vtype in sorted(org_df['vcType'].unique()):
                 type_df = org_df[org_df['vcType'] == vtype]
                 for agent in sorted(type_df['vcAgentName'].unique()):
                     agent_df = type_df[type_df['vcAgentName'] == agent]
@@ -199,6 +200,76 @@ def create_agent_agg_pivot(df):
     
     return result.fillna(0).round(0).astype({'Sent': int, 'Delivered': int})
 
+def create_volume_analysis(od_df):
+    """Create volume analysis table with RCS and SMS volumes by part type"""
+    if od_df.empty:
+        return pd.DataFrame()
+    
+    # Add RCS and SMS volume columns
+    working_df = od_df.copy()
+    working_df['RCS_Vol'] = working_df['Delivered']
+    working_df['SMS_Vol'] = working_df['Parts'] * working_df['Delivered']
+    
+    # Initialize DataFrame for results
+    records = []
+    
+    # Process each date
+    for date in sorted(working_df['Date'].unique()):
+        date_df = working_df[working_df['Date'] == date]
+        
+        # RCS Volume calculations
+        basic_df = date_df[date_df['ContentType'] == 'Basic']
+        multi_df = date_df[date_df['ContentType'] != 'Basic']
+        
+        # RCS Volumes
+        records.append({
+            'Category': 'RCS Vol',
+            'PartType': 'Single Part',
+            'Date': date,
+            'Volume': basic_df['RCS_Vol'].sum()
+        })
+        records.append({
+            'Category': 'RCS Vol',
+            'PartType': 'Multipart',
+            'Date': date,
+            'Volume': multi_df['RCS_Vol'].sum()
+        })
+        
+        # SMS Volumes
+        records.append({
+            'Category': 'SMS Vol',
+            'PartType': 'Single Part',
+            'Date': date,
+            'Volume': basic_df['SMS_Vol'].sum()
+        })
+        records.append({
+            'Category': 'SMS Vol',
+            'PartType': 'Multipart',
+            'Date': date,
+            'Volume': multi_df['SMS_Vol'].sum()
+        })
+    
+    # Create pivot table with multi-index
+    result = pd.pivot_table(
+        pd.DataFrame(records),
+        index=['Category', 'PartType'],
+        columns=['Date'],
+        values='Volume',
+        aggfunc='sum',
+        fill_value=0
+    )
+    
+    # Add Total column
+    result['Total'] = result.sum(axis=1)
+    
+    # Calculate Projection
+    today = datetime.now()
+    days_in_month = calendar.monthrange(today.year, today.month)[1]
+    days_completed = today.day
+    result['Projection'] = result['Total'] * (days_in_month / days_completed)
+    
+    return result.round(0).astype(int)
+
 def export_mtd_analysis(traffic_df, od_df):
     """Export all analyses to Excel"""
     if traffic_df.empty and od_df.empty:
@@ -207,24 +278,27 @@ def export_mtd_analysis(traffic_df, od_df):
     output_path = os.path.join(os.path.dirname(__file__), 'RCS_Analysis.xlsx')
     
     with pd.ExcelWriter(output_path, engine='xlsxwriter', mode='w') as writer:
-        # Export each pivot table
+        # Export each pivot table with new sheet names
         create_vctype_daily_pivot(traffic_df).to_excel(
-            writer, sheet_name='1. Daily Traffic'
+            writer, sheet_name='Summary'
         )
         create_od_agent_pivot(traffic_df).to_excel(
-            writer, sheet_name='2. OD Agent Traffic'
+            writer, sheet_name='OD Summary'
         )
         create_content_type_pivot(od_df).to_excel(
-            writer, sheet_name='3. Content Types'
+            writer, sheet_name='Daywise OD summary'
         )
         create_detailed_hierarchy(traffic_df).to_excel(
-            writer, sheet_name='4. Detailed Hierarchy'
+            writer, sheet_name='Daywise'
         )
         create_agg_agent_pivot(traffic_df).to_excel(
-            writer, sheet_name='5. Agg-Agent'
+            writer, sheet_name='Aggregator'
         )
         create_agent_agg_pivot(traffic_df).to_excel(
-            writer, sheet_name='6. Agent-Agg'
+            writer, sheet_name='Botwise'
+        )
+        create_volume_analysis(od_df).to_excel(
+            writer, sheet_name='RCSVol&SMSVol'
         )
         
         print(f"Analysis exported to: {output_path}")
