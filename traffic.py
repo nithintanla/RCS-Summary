@@ -154,4 +154,12 @@ def create_traffic_pivot(dfs):
         last_last_month_name
     ])
     
+    # Calculate G.Total as sum of rows starting with "Total"
+    total_rows = result[result.index.str.startswith('Total')]
+    result.loc['G. Total'] = total_rows.sum()
+
+    
+    # Round to 4 decimal places
+    result = result.round(4)
+    
     return result

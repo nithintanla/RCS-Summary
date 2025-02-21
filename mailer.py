@@ -66,7 +66,7 @@ def send_summary_email(traffic_pivot, od_pivot, excel_path, recipients):
             <p>Please find the RCS vol for {pd.Timestamp.now().strftime('%b\'%y')}.</p>
             
             <div style="margin: 20px 0;">
-                <p style="font-weight: bold; margin-bottom: 8px;">Traffic Summary:</p>
+                <p style="font-weight: bold; margin-bottom: 8px;">Overall Traffic Summary:</p>
                 <p style="color: #666666; font-size: 10pt; margin-bottom: 8px;">*vol in Millions</p>
                 {create_clean_table(traffic_pivot)}
             </div>
@@ -80,8 +80,6 @@ def send_summary_email(traffic_pivot, od_pivot, excel_path, recipients):
             <p style="color: #666666; margin-top: 20px;">
                 Please find the detailed analysis in the attached Excel file.
             </p>
-            
-            <p>Thanks and Regards</p>
         </body>
         </html>
         """

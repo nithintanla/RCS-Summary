@@ -4,38 +4,34 @@ import os
 import calendar
 
 def create_vctype_daily_pivot(df):
-    """Table 1: Date-wise breakdown by vcType with vcType headers"""
+    """Updated Summary sheet with specified columns"""
     if df.empty:
         return pd.DataFrame()
     
-    # Create initial pivot
     pivot = pd.pivot_table(
         df,
         index='dtDate',
-        columns=['vcType'],
+        columns='vcType',
         values=['iTotalSentSuccess', 'iTotalDelivered'],
-        aggfunc='sum',  # Removed millions division
-        fill_value=0
-    ).round(2)
+        aggfunc='sum'
+    ).round(4)
     
-    # Restructure with proper headers
-    header_1 = pd.DataFrame(columns=pivot.columns)
-    header_2 = pd.DataFrame(columns=pivot.columns)
-    
-    # Fill headers
-    for vtype in ['CPL', 'Enterprise', 'OD']:
+    # Restructure columns for OD, Enterprise, CPL
+    new_cols = []
+    for vtype in ['OD', 'Enterprise', 'CPL']:
         if ('iTotalSentSuccess', vtype) in pivot.columns:
-            header_1.loc[0, [('iTotalSentSuccess', vtype), ('iTotalDelivered', vtype)]] = vtype
-            header_2.loc[0, ('iTotalSentSuccess', vtype)] = 'Sent'
-            header_2.loc[0, ('iTotalDelivered', vtype)] = 'Delivered'
+            new_cols.extend([('iTotalSentSuccess', vtype), ('iTotalDelivered', vtype)])
     
-    # Combine headers with data
-    result = pd.concat([header_1, header_2, pivot])
+    pivot = pivot[new_cols]
     
-    # Add totals
-    result.loc['Total'] = result.iloc[2:].sum()
+    # Add total columns
+    pivot['Total_Sent'] = pivot.xs('iTotalSentSuccess', axis=1, level=0).sum(axis=1)
+    pivot['Total_Delivered'] = pivot.xs('iTotalDelivered', axis=1, level=0).sum(axis=1)
     
-    return result
+    # Flatten MultiIndex columns
+    pivot.columns = [f"{vtype} {metric}" for metric, vtype in pivot.columns]
+    
+    return pivot
 
 def create_od_agent_pivot(df):
     """Table 2: OD traffic by agent with aggregator grouping"""
@@ -320,38 +316,78 @@ def create_od_pivot(dfs):
 
 def export_mtd_analysis(traffic_df, od_df):
     """Export all analyses to Excel with consistent styling"""
-    if traffic_df.empty and od_df.empty:
-        return
-        
     output_path = os.path.join(os.path.dirname(__file__), 'RCS_Analysis.xlsx')
     
     with pd.ExcelWriter(output_path, engine='xlsxwriter', mode='w') as writer:
         workbook = writer.book
         
-        # Define left-aligned format
-        left_format = workbook.add_format({'align': 'left'})
+        # Define formats
+        left_format = workbook.add_format({
+            'align': 'left',
+            'num_format': '0.0000'  # 4 decimal places
+        })
+        date_format = workbook.add_format({
+            'align': 'left',
+            'num_format': 'yyyy-mm-dd'  # Date without time
+        })
+
+        # Export each table with formatting
+        sheets = {
+            'OD Summary': create_od_agent_pivot(traffic_df),
+            'RCSVol&SMSVol': create_volume_analysis(od_df),
+            'Summary': create_vctype_daily_pivot(traffic_df),
+            'Daywise OD summary': create_content_type_pivot(od_df),
+            'Daywise': create_detailed_hierarchy(traffic_df),
+            'Aggregator': create_agg_agent_pivot(traffic_df),
+            'Botwise': create_agent_agg_pivot(traffic_df)
+        }
         
-        # Export each table with consistent formatting
-        for name, df in [
-            ('OD Summary', create_od_agent_pivot(traffic_df)),
-            ('RCSVol&SMSVol', create_volume_analysis(od_df)),
-            ('Summary', create_vctype_daily_pivot(traffic_df)),
-            ('Daywise OD summary', create_content_type_pivot(od_df)),
-            ('Daywise', create_detailed_hierarchy(traffic_df)),
-            ('Aggregator', create_agg_agent_pivot(traffic_df)),
-            ('Botwise', create_agent_agg_pivot(traffic_df))
-        ]:
-            # Export DataFrame
-            df.to_excel(writer, sheet_name=name)
+        for name, df in sheets.items():
+            if df.empty:
+                continue
+                
+            # Reset index to remove numbering
+            if isinstance(df.index, pd.MultiIndex):
+                # For MultiIndex, split into separate columns
+                df = df.reset_index()
+                
+                # Split any combined columns (like Agent - ContentType)
+                for col in df.columns:
+                    if isinstance(col, str) and ' - ' in col:
+                        parts = col.split(' - ')
+                        for i, part in enumerate(parts):
+                            df[part] = df[col].apply(lambda x: str(x).split(' - ')[i] if ' - ' in str(x) else x)
+                        df = df.drop(columns=[col])
+            else:
+                df = df.reset_index()
             
-            # Get the worksheet
+            # Flatten MultiIndex columns if they exist
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = [f"{col[0]}_{col[1]}" if isinstance(col, tuple) else col for col in df.columns]
+            
+            # Format dates if present
+            date_cols = [col for col in df.columns if 'date' in str(col).lower() or 'dt' in str(col).lower()]
+            for col in date_cols:
+                if pd.api.types.is_datetime64_any_dtype(df[col]):
+                    df[col] = df[col].dt.strftime('%Y-%m-%d')
+            
+            # Organize columns - move numeric columns to the end
+            numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
+            non_numeric_cols = df.select_dtypes(exclude=['float64', 'int64']).columns
+            df = df[list(non_numeric_cols) + list(numeric_cols)]
+            
+            # Export DataFrame
+            df.to_excel(writer, sheet_name=name, index=False)
+            
+            # Get worksheet
             worksheet = writer.sheets[name]
             
-            # Set left alignment for all columns
-            for col in range(len(df.columns) + 1):  # +1 for index
-                worksheet.set_column(col, col, None, left_format)
-        
-        print(f"Analysis exported to: {output_path}")
+            # Apply formats to all columns
+            for col_num, col in enumerate(df.columns):
+                if col in date_cols:
+                    worksheet.set_column(col_num, col_num, None, date_format)
+                else:
+                    worksheet.set_column(col_num, col_num, None, left_format)
 
 def analyze_mtd_data(traffic_df, od_df):
     """Process MTD data and create analysis"""
