@@ -94,7 +94,7 @@ def create_content_type_pivot(od_df):
 def create_detailed_hierarchy(df):
     """Table 4: Detailed hierarchy with all dimensions"""
     if df.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=['Date', 'Organization', 'Type', 'Agent', 'Sent', 'Delivered'])
     
     records = []
     
@@ -116,27 +116,25 @@ def create_detailed_hierarchy(df):
                     })
     
     result = pd.DataFrame(records)
-    if result.empty:
-        return pd.DataFrame(columns=['Date', 'Organization', 'Type', 'Agent', 'Sent', 'Delivered'])
+    if not result.empty:
+        # Calculate totals
+        total_sent = result['Sent'].sum()
+        total_delivered = result['Delivered'].sum()
+        
+        # Add totals row
+        result = pd.concat([
+            result,
+            pd.DataFrame([{
+                'Date': 'Total',
+                'Organization': 'Total',
+                'Type': 'Total',
+                'Agent': 'Total',
+                'Sent': total_sent,
+                'Delivered': total_delivered
+            }])
+        ])
     
-    # Calculate totals first
-    total_sent = result['Sent'].sum()
-    total_delivered = result['Delivered'].sum()
-    
-    # Add totals row using a new dictionary
-    result = pd.concat([
-        result,
-        pd.DataFrame([{
-            'Date': 'Total',
-            'Organization': 'Total',
-            'Type': 'Total',
-            'Agent': 'Total',
-            'Sent': total_sent,
-            'Delivered': total_delivered
-        }])
-    ], ignore_index=True)
-    
-    return result.fillna(0).round(0).astype({'Sent': int, 'Delivered': int})
+    return result.fillna(0).round(4)  # Changed to 4 decimal places
 
 def create_agg_agent_pivot(df):
     """Table 5: Aggregator-Agent breakdown"""
@@ -170,9 +168,9 @@ def create_agg_agent_pivot(df):
                 'Sent': total_sent,
                 'Delivered': total_delivered
             }])
-        ], ignore_index=True)
+        ])
     
-    return result.fillna(0).round(0).astype({'Sent': int, 'Delivered': int})
+    return result.fillna(0).round(4)  # Changed to 4 decimal places
 
 def create_agent_agg_pivot(df):
     """Table 6: Agent-Aggregator breakdown"""
@@ -206,9 +204,9 @@ def create_agent_agg_pivot(df):
                 'Sent': total_sent,
                 'Delivered': total_delivered
             }])
-        ], ignore_index=True)
+        ])
     
-    return result.fillna(0).round(0).astype({'Sent': int, 'Delivered': int})
+    return result.fillna(0).round(4)  # Changed to 4 decimal places
 
 def create_volume_analysis(od_df):
     """Table 7: Volume analysis with totals"""
